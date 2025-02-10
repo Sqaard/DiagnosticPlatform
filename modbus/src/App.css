@@ -1,0 +1,104 @@
+/* Tab Bar */
+
+
+.tab-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.tab-button {
+  padding: 10px 20px;
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 16px;
+}
+
+.tab-button.active {
+  background-color: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.tab-button.add-tab {
+  background-color: #28a745;
+  color: white;
+  border-color: #28a745;
+}
+
+/* Graph Container */
+.graph-container {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr); /* 3 columns */
+  gap: 30px; /* Space between graphs */
+  row-gap: 60px;
+  justify-content: center; /* Center the grid */
+}
+
+.graph-title {
+  text-align: center;
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.graph-wrapper {
+  width: 600px; /* Fixed size for each graph */
+  height: 300px; /* Fixed height */
+}
+
+.button-wrapper {
+  width: 600px; /* Same width as the graphs */
+  height: 300px; /* Ensure it occupies the same height as graphs */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: none; /* Optional: A dashed border to indicate space */
+  background-color: transparent; /* Matches background */
+  border-radius: 8px; /* Rounded corners */
+}
+
+.button-wrapper.add-graph {
+  background-color: #28a745;
+  color: white;
+  border-color: #28a745;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.countdown-message {
+  font-size: 14px;
+  color: #555;
+  text-align: center;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.spinner {
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #3498db;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,37 @@
+services:
+  flask:
+    build: ./flask
+    container_name: react_rt-flask
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./flask:/app
+    environment:
+      - FLASK_ENV=development
+
+  modbus:
+    build: ./modbus
+    container_name: react_rt-modbus
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./modbus:/app
+      - /app/node_modules  
+    stdin_open: true
+    tty: true
+    depends_on:
+      - flask
+      - express-server
+
+  express-server:
+    build: ./server
+    container_name: react_rt-express
+    ports:
+      - "5001:5001"  # Express server
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    command: ["node", "server.js"]
+    depends_on:
+      - flask
+      
