@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import MotorControl from './components/MotorControl';
-import CSVHandler from './components/CSVHandler';
 import CustomRecharts from './components/CustomRecharts';
 import ButtonComponent from './components/ButtonComponent';
 import './App.css';
@@ -359,13 +357,13 @@ const App = () => {
   useEffect(() => {
     if (latestData && latestData.length >= 2) {
       setIsDelayActive(true);
-      setCountdown(3); // Start the countdown at 3 seconds
+      setCountdown(5); // Start the countdown at 5 seconds
   
       const interval = setInterval(() => {
         setCountdown((prev) => {
           if (prev === 1) {
             clearInterval(interval);
-            setIsDelayActive(false); // Enable the button after the countdown
+            setIsDelayActive(false); 
           }
           return prev - 1;
         });

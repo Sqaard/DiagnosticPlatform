@@ -13,7 +13,7 @@ services:
     build: ./modbus
     container_name: react_rt-modbus
     ports:
-      - "3000:3000"
+      - "80:80"
     volumes:
       - ./modbus:/app
       - /app/node_modules  
