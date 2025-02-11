@@ -55,9 +55,9 @@ const App = () => {
   const calculatePowerData = (data) => {
     return data.map((row) => ({
       ...row,
-      Pa: parseFloat(row.Ia) * parseFloat(row.Ua),
-      Pb: parseFloat(row.Ib) * parseFloat(row.Ub),
-      Pc: parseFloat(row.Ic) * parseFloat(row.Uc),
+      Pa: parseFloat(row.ia) * parseFloat(row.ua),
+      Pb: parseFloat(row.ib) * parseFloat(row.ub),
+      Pc: parseFloat(row.ic) * parseFloat(row.uc),
     }));
   };
 
@@ -80,8 +80,8 @@ const App = () => {
     }
 
     const requestBody = {
-      "x": data.map((row) => parseFloat(row.Ia)), 
-      "y": data.map((row) => parseFloat(row.Ua)),   
+      "x": data.map((row) => parseFloat(row.ia)), 
+      "y": data.map((row) => parseFloat(row.ua)),   
     };
 
     const response = await fetch(`http://192.168.1.72:5000${endpoint}`, {
