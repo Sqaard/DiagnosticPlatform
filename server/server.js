@@ -1,27 +1,52 @@
-import express from 'express';
-import cors from 'cors';
-//simple Node.js server to handle POST requests and forward the data to the React app in Real-Time
-const app = express();
-const port = 5001; // Use a different port than your Flask server
+import { WebSocketServer, WebSocket } from 'ws';
+import dotenv from 'dotenv';
 
-app.use(cors());
-app.use(express.json());
+dotenv.config(); // Load environment variables from .env file
 
-// Store the latest data
-let latestData = null;
+const PORT = process.env.SOCKET_PORT; // WebSocket server port
+const IP = process.env.SOCKET_IP;
+const wss = new WebSocketServer({ port: PORT });
 
-// Endpoint to receive POST requests
-app.post('/data', (req, res) => {
-  latestData = req.body; // Store the incoming data
-  console.log('Received data:', latestData);
-  res.status(200).send('Data received');
+console.log(`WebSocket server is running on ws://${IP}:${PORT}`);
+
+let latestData = null;  // To store the latest received data
+
+// Handle WebSocket connections
+wss.on('connection', (ws) => {
+  console.log('New WebSocket connection');
+
+  // Send the latest data to the client when they connect
+  if (latestData) {
+    ws.send(JSON.stringify(latestData)); // Send current latestData to the client
+  }
+
+  // Handle incoming messages from the client (e.g., sensor data)
+  ws.on('message', (message) => {
+    console.log('Received message from client:', message.toString());
+    
+    try {
+      const parsedData = JSON.parse(message.toString());
+
+      // Store or process the received data
+      latestData = parsedData;
+
+      // Optionally: Do any processing or validation here (e.g., store in a database)
+
+      // Broadcast the new data to all clients
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(latestData)); // Send the latest data to all connected clients
+        }
+      });
+    } catch (error) {
+      console.error('Error parsing incoming data:', error);
+    }
+  });
+
+  // Handle client disconnection
+  ws.on('close', () => {
+    console.log('WebSocket connection closed');
+  });
 });
 
-// Endpoint for React app to fetch the latest data
-app.get('/data', (req, res) => {
-  res.status(200).json(latestData);
-});
-
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
-});
+console.log(`WebSocket server is ready on ws://${IP}:${PORT}`);

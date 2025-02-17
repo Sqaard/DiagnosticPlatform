@@ -4,6 +4,14 @@ import numpy as np
 from scipy import signal
 import scaleogram as scg 
 from flask_cors import CORS
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+PORT = int(os.getenv('FLASK_PORT', 5000))
+IP = os.getenv('FLASK_IP', '0.0.0.0')
 
 app = Flask(__name__)
 CORS(app)
@@ -155,22 +163,19 @@ def hilbert_transform():
 @app.route('/real_imag_hilbert', methods=['POST'])
 def real_imag_hilbert_route():
     try:
-        # Получение данных из запроса
         x, y = process_request()
-        margin = request.json.get('margin', 0.2)  # Необязательный параметр (по умолчанию 0.2)
-        order = request.json.get('order', 16)    # Необязательный параметр (по умолчанию 16)
+        margin = request.json.get('margin', 0.2) 
+        order = request.json.get('order', 16)   
 
-        # Расширение данных с помощью метода Burg
         x_ext, y_ext, Nl, Nr = burg(x, y, margin, order)
         N = len(y)
 
         # Применение преобразования Гильберта
         S = signal.hilbert(y_ext, N + Nl + Nr)
-        S = S[Nl: N + Nl]  # Убираем расширенные края
-        Im = S.imag         # Мнимая часть
-        Re = S.real         # Действительная часть
+        S = S[Nl: N + Nl] 
+        Im = S.imag         
+        Re = S.real         
 
-        # Возврат результата
         return jsonify({
             "real_part": Re.tolist(),
             "imaginary_part": Im.tolist()
@@ -191,7 +196,6 @@ def real_imag_fft_route():
         Re = S.real  # Реальная часть
         Im = S.imag  # Мнимая часть
 
-        # Возврат результата
         return jsonify({
             "real": Re.tolist(),
             "imaginary": Im.tolist()
@@ -203,19 +207,16 @@ def real_imag_fft_route():
 def analytic_signal_route():
     try:
         x, y = process_request()
-        margin = request.json.get('margin', 0.3)  # Необязательный параметр (по умолчанию 0.3)
-        order = request.json.get('order', 16)    # Необязательный параметр (по умолчанию 16)
+        margin = request.json.get('margin', 0.3)  
+        order = request.json.get('order', 16)   
 
-        # Расширение данных с помощью метода Burg
         x_ext, y_ext, Nl, Nr = burg(x, y, margin, order)
         N = len(y)
 
-        # Вычисление аналитического сигнала
         S = signal.hilbert(y_ext, N + Nl + Nr)
-        S = S[Nl: N + Nl]  # Убираем расширенные края
-        A = np.abs(S)      # Амплитуда аналитического сигнала
+        S = S[Nl: N + Nl]  
+        A = np.abs(S)      
 
-        # Возврат результата
         return jsonify({
             "amplitude": A.tolist()
         })
@@ -223,4 +224,4 @@ def analytic_signal_route():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=PORT)

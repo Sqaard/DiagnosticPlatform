@@ -3,18 +3,26 @@ import CustomRecharts from './components/CustomRecharts';
 import ButtonComponent from './components/ButtonComponent';
 import './App.css';
 
+
 const App = () => {
   const [latestData, setLatestData] = useState([]); //state to store the latest data from the backend
-  const prevDataRef = useRef([]);
   const [isAddGraphDisabled, setIsAddGraphDisabled] = useState(true);
-  const [isDelayActive, setIsDelayActive] = useState(false);
-  const [countdown, setCountdown] = useState(0);
+  const ws = useRef(null);
+
+  // Load ports from environment variables
+  const SOCKET_PORT = import.meta.env.VITE_SOCKET_PORT || 5001;
+  const FLASK_PORT = import.meta.env.VITE_FLASK_PORT || 5000;
+  const FLASK_IP = import.meta.env.VITE_FLASK_IP || '192.168.1.72';
+  const SOCKET_IP = import.meta.env.VITE_SOCKET_IP || 'localhost';
+
+  const FLASK_URL = `http://${FLASK_IP}:${FLASK_PORT}`;
+  const SOCKET_URL = `ws://${SOCKET_IP}:${SOCKET_PORT}`
 
   //state for managing tabs
   const [tabs, setTabs] = useState([
     {
       id: 1,
-      name: 'Tab 1',
+      name: 'Таблица 1',
       graphs: [], 
     },
   ]);
@@ -39,11 +47,11 @@ const App = () => {
     const newTabId = tabs.length + 1;
     const newTab = {
       id: newTabId,
-      name: `Tab ${newTabId}`,
+      name: `Таблица ${newTabId}`,
       graphs: [], //new tab starts with no graphs
     };
     setTabs([...tabs, newTab]);
-    setActiveTab(newTabId); //switch to the new tab
+    setActiveTab(newTabId);
   };
 
   //function to switch between tabs
@@ -84,7 +92,7 @@ const App = () => {
       "y": data.map((row) => parseFloat(row.ua)),   
     };
 
-    const response = await fetch(`http://192.168.1.72:5000${endpoint}`, {
+    const response = await fetch(`${FLASK_URL}${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -240,31 +248,29 @@ const App = () => {
     }
   };
 
-  //function to fetch the latest data from the backend
-  const fetchLatestData = async () => {
-    try {
-      const response = await fetch('http://localhost:5001/data'); 
-      if (!response.ok) {
-        throw new Error('Failed to fetch latest data');
-      }
-      const data = await response.json();
-      if(JSON.stringify(data) !== JSON.stringify(prevDataRef.current)){
-        setLatestData((prevData) => [...prevData, data]);
-        prevDataRef.current = data;
-      }
-    } catch (error) {
-      console.error('Error fetching latest data:', error);
-    }
-  };
-
-  //interval for fetching data every second
+  // WebSocket connection
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchLatestData();
-    }, 1000); 
+    ws.current = new WebSocket(SOCKET_URL);
 
-    return () => clearInterval(interval); 
+    // Handle incoming messages from the server
+    ws.current.onmessage = (event) => {
+      const newData = JSON.parse(event.data);
+      setLatestData((prevData) => [...prevData, newData]);
+    };
+
+    // Handle WebSocket errors
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    // Cleanup on unmount
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
   }, []);
+
 
   //update existing graphs (when latestData changes)
   useEffect(() =>  {
@@ -274,7 +280,7 @@ const App = () => {
         let newData;
         switch (graph.type) {
           case 'Фазы токов и напряжений':
-            newData = [...graph.data, ...latestData];
+            newData = latestData;
             break;
           case 'Мощность и время':
             newData = calculatePowerData(latestData);
@@ -353,28 +359,6 @@ const App = () => {
 
   }, [latestData]);
 
-  //update button disabled state based on data length
-  useEffect(() => {
-    if (latestData && latestData.length >= 2) {
-      setIsDelayActive(true);
-      setCountdown(5); // Start the countdown at 5 seconds
-  
-      const interval = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev === 1) {
-            clearInterval(interval);
-            setIsDelayActive(false); 
-          }
-          return prev - 1;
-        });
-      }, 1000);
-  
-      // Cleanup the interval on unmount or if latestData changes
-      return () => clearInterval(interval);
-    } else {
-      setIsAddGraphDisabled(true);
-    }
-  }, [latestData]);
 
   // Get the active tab's data
   const activeTabData = tabs.find((tab) => tab.id === activeTab);
@@ -415,10 +399,6 @@ const App = () => {
               availableGraphs={availableGraphs}
               isDisabled={isAddGraphDisabled}
             />
-            {isDelayActive && <p className="countdown-message">
-              <span className="spinner"></span>
-              Пожалуйста подождите {countdown} c.
-              </p>}
           </div>
         
       </div>

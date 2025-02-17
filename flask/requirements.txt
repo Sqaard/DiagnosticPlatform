@@ -5,3 +5,4 @@ scipy
 PyWavelets
 scaleogram
 matplotlib
+python-dotenv
