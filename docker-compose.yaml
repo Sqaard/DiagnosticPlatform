@@ -13,9 +13,10 @@ services:
     build: ./modbus
     container_name: electric-diagnostic-stand-frontend
     ports:
-      - "${REACT_PORT}:${REACT_PORT}"
+      - "${HOST_PORT}:${REACT_PORT}"
     environment:
       - REACT_PORT=${REACT_PORT}
+      - HOST_PORT=${HOST_PORT}
     volumes:
       - ./modbus:/app
       - /app/node_modules  
