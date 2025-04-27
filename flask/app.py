@@ -1,12 +1,18 @@
 from flask import Flask, request, jsonify
 import pywt
 import numpy as np
+import pandas as pd
 from scipy import signal
 import scaleogram as scg 
 from flask_cors import CORS
+import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import os
-
+import io
+import base64
+import cmath
+import math
+import json
 # Load environment variables from .env file
 load_dotenv()
 
@@ -16,15 +22,8 @@ IP = os.getenv('FLASK_IP', '0.0.0.0')
 app = Flask(__name__)
 CORS(app)
 
-def validate_data(arr):
-    if np.any(np.isnan(arr)) or np.any(np.isinf(arr)):
-        return False
-    return True
-
 def burg(X: np.ndarray, F: np.ndarray, ext: float, NCOEF: int):
-    if not validate_data(X) or not validate_data(F):
-        raise ValueError("Input contains NaN or Infinity values.")
-    
+
     N = len(F)
     XC = np.copy(F)
     AA = np.copy(F)
@@ -72,6 +71,11 @@ def burg(X: np.ndarray, F: np.ndarray, ext: float, NCOEF: int):
 
     return Xe, Fe, Nl, Nr
 
+def validate_data(arr):
+    if np.any(np.isnan(arr)) or np.any(np.isinf(arr)):
+        return False
+    return True
+
 def process_request():
     data = request.json
     x = np.array(data.get('x'))
@@ -81,15 +85,83 @@ def process_request():
     if not validate_data(x) or not validate_data(y):
         return jsonify({"error": "Input contains NaN or Infinity values."}), 400
     return x, y
+
+def process_request_df():
+    data = request.json
+    if not data:
+        return None, jsonify({"error": "No JSON data provided."}), 400
+    
+    df = pd.DataFrame(data.get('data'))
+    if df.empty:
+        return None, jsonify({"error": "Empty data provided."}), 400
+    
+    column_names = df.columns.tolist()
+    if len(column_names) < 2:
+        return None, jsonify({"error": "Data must contain at least two columns."}), 400
+    return df, None
+
 def process_response(response_data):
+    # Проверяем, что response_data — словарь
+    if not isinstance(response_data, dict):
+        return jsonify(response_data)  # Если не словарь, просто возвращаем как есть
+    
+    # Обрабатываем вложенные структуры
     for key, value in response_data.items():
-        arr = np.array(value)
-        if np.any(np.isnan(arr)) or np.any(np.isinf(arr)):
-            response_data[key] = [] if arr.ndim > 0 else None
+        if isinstance(value, dict):  # Например, "hodographs" или "vectors"
+            for sub_key, sub_value in value.items():
+                if isinstance(sub_value, list):  # Список точек [{"x": float, "y": float}, ...]
+                    cleaned_list = []
+                    for point in sub_value:
+                        if isinstance(point, dict) and "x" in point and "y" in point:
+                            x = point["x"]
+                            y = point["y"]
+                            cleaned_list.append({"x": float(x), "y": float(y)})
+                        else:
+                            cleaned_list.append(None)  # Некорректная структура точки
+                    value[sub_key] = cleaned_list
+                elif isinstance(sub_value, dict):  # Для /vector-graph, где значения — словари
+                    for k, v in sub_value.items():
+                        if isinstance(v, (int, float)):
+                            sub_value[k] = None
+                    value[sub_key] = sub_value
     return jsonify(response_data)
 
+def process_phase_data(data, phase_keys):
+    phases_data = {}
+    for key in phase_keys:
+        try:
+            phases_data[key] = [float(x) for x in data[key]]
+        except (ValueError, TypeError):
+            return None, jsonify({"error": f"Non-numeric data in {key}"}), 400
+    
+    return phases_data, None
+
+def ifft(a):
+    N = len(a)
+    if N <= 1:
+        return a
+    even = ifft(a[0::2])
+    odd = ifft(a[1::2])
+    T = [cmath.exp(2j * cmath.pi * k / N) * odd[k] for k in range(N // 2)]
+    return [even[k] + T[k] for k in range(N // 2)] + \
+           [even[k] - T[k] for k in range(N // 2)]
+def fftshift(x):
+    N = len(x)
+    return x[N//2:] + x[:N//2]
+
+def fftfreq(N, d=1.0):
+    if N % 2 == 0:
+        n = list(range(-N//2, N//2))
+    else:
+        n = list(range(-(N-1)//2, (N-1)//2 + 1))
+    return [k / (N * d) for k in n]
+
+
+def rfftfreq(N, d=1.0):
+    return [k / (N * d) for k in range(N // 2 + 1)]
+
 @app.route('/rfft', methods=['POST'])
-def rfft():
+def compute_rfft():
     try:
         x, y = process_request()
         N = len(y)
@@ -102,7 +174,7 @@ def rfft():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/fft', methods=['POST'])
-def fft():
+def compute_fft():
     try:
         x, y = process_request()
         N = len(y)
@@ -115,40 +187,93 @@ def fft():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/wavelet', methods=['POST'])
-def wavelet():
+def mean(data):
+    return sum(data) / len(data)
+
+def variance(data):
+    mu = mean(data)
+    return sum((x - mu) ** 2 for x in data) / len(data)
+
+def convolve(x, y):
+    """Ручная реализация свертки."""
+    n, m = len(x), len(y)
+    result = [0.0] * (n + m - 1)
+    for i in range(n):
+        for j in range(m):
+            result[i + j] += x[i] * y[j]
+    return result
+
+def fft_convolve(x, y):
+    """Ручная реализация свертки через FFT."""
+    
+    # Дополняем массивы до степени двойки
+    N = len(x) + len(y) - 1
+    N_fft = 2 ** math.ceil(math.log2(N))
+    x_padded = x + [0.0] * (N_fft - len(x))
+    y_padded = y + [0.0] * (N_fft - len(y))
+
+    # Вычисляем FFT для обоих массивов
+    X = np.fft.fft(x_padded)
+    Y = np.fft.fft(y_padded)
+
+    # Поэлементное умножение
+    Z = [X[k] * Y[k] for k in range(N_fft)]
+
+    # Обратное FFT
+    z = ifft(Z)
+
+    # Возвращаем действительную часть результата
+    return [val.real for val in z[:N]]
+
+@app.route('/acf', methods=['POST'])
+def compute_acf():
     try:
         x, y = process_request()
-        # wavelet_family = data.get('wavelet_family', "cmor")
-        # wavelet_name = data.get('wavelet_name', "cmor")
-        dx = x[1] - x[0]
-        scales = scg.periods2scales(np.arange(1, 60))
-        coefs, freqs = pywt.cwt(y, scales, wavelet='cmor', sampling_period=dx)
+        N = len(y)
+
+        # Центрирование данных
+        y_mean = mean(y)
+        yc = [yi - y_mean for yi in y]
+
+        # Вычисление дисперсии
+        var = variance(y)
+
+        # Свертка через FFT
+        ACF = fft_convolve(yc, yc[::-1])
+
+        # Нормализация на дисперсию
+        ACF = [acf_val / (var * N) for acf_val in ACF]
+
+        # Вычисление задержек
+        lags = list(range(-N // 2, N // 2))
+
+        # Возвращаем результат
         return jsonify({
-            "scales": scales.tolist(),
-            "frequencies": freqs.tolist(),
-            "coefficients_real": coefs.real.tolist(),
-            "coefficients_imag": coefs.imag.tolist()
+            "lags": lags,
+            "acf": ACF[N // 2 - 1: 3 * N // 2]  # Центрируем результат
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/acf', methods=['POST'])
-def acf():
-    try:
-        x, y = process_request()
-        N = len(y)
-        yc = y - np.mean(y)
-        var = np.var(y)
-        ACF = signal.fftconvolve(yc, yc[::-1], mode='same') / var
-        lags = np.arange(-N // 2, N // 2)
-        return jsonify({"lags": lags.tolist(), "acf": ACF.tolist()})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+def hilbert(y):
+    """Ручная реализация преобразования Гильберта."""
+    N = len(y)
+    # Вычисляем FFT
+    Y = np.fft.fft(y)
+    # Создаем массив для преобразования Гильберта
+    H = [0.0] * N
+    H[0] = 1.0
+    H[N // 2] = 1.0
+    for i in range(1, N // 2):
+        H[i] = 2.0
+    # Поэлементное умножение
+    Z = [Y[k] * H[k] for k in range(N)]
+    # Обратное FFT
+    z = ifft(Z)
+    return z
 
 @app.route('/hilbert', methods=['POST'])
-def hilbert_transform():
+def compute_hilbert():
     try:
         x, y = process_request()
         margin = request.json.get('margin', 0.2)
@@ -164,21 +289,26 @@ def hilbert_transform():
 def real_imag_hilbert_route():
     try:
         x, y = process_request()
-        margin = request.json.get('margin', 0.2) 
-        order = request.json.get('order', 16)   
+        margin = request.json.get('margin', 0.2)
+        order = request.json.get('order', 16)
 
+        # Расширение данных методом Бурга
         x_ext, y_ext, Nl, Nr = burg(x, y, margin, order)
         N = len(y)
 
         # Применение преобразования Гильберта
-        S = signal.hilbert(y_ext, N + Nl + Nr)
-        S = S[Nl: N + Nl] 
-        Im = S.imag         
-        Re = S.real         
+        S = hilbert(y_ext)
+
+        # Извлечение центральной части
+        S_central = S[Nl: N + Nl]
+
+        # Разделение на действительную и мнимую части
+        Re = [s.real for s in S_central]
+        Im = [s.imag for s in S_central]
 
         return jsonify({
-            "real_part": Re.tolist(),
-            "imaginary_part": Im.tolist()
+            "real_part": Re,
+            "imaginary_part": Im
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -207,21 +337,226 @@ def real_imag_fft_route():
 def analytic_signal_route():
     try:
         x, y = process_request()
-        margin = request.json.get('margin', 0.3)  
-        order = request.json.get('order', 16)   
+        margin = request.json.get('margin', 0.3)
+        order = request.json.get('order', 16)
 
+        # Расширение данных методом Бурга
         x_ext, y_ext, Nl, Nr = burg(x, y, margin, order)
         N = len(y)
 
-        S = signal.hilbert(y_ext, N + Nl + Nr)
-        S = S[Nl: N + Nl]  
-        A = np.abs(S)      
+        # Применение преобразования Гильберта
+        S = hilbert(y_ext)
+
+        # Извлечение центральной части
+        S_central = S[Nl: N + Nl]
+
+        # Вычисление амплитуды аналитического сигнала
+        A = [abs(s) for s in S_central]
 
         return jsonify({
-            "amplitude": A.tolist()
+            "amplitude": A
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+def vector_plot(I1, I2, I3, U1, U2, U3):
+    # Normalize currents
+    i_norm = max(abs(I1), abs(I2), abs(I3))
+    if i_norm == 0:
+        i_norm = 1  # Avoid division by zero
+
+    # Calculate current vectors
+    Ui1 = abs(I1) / i_norm
+    Vi1 = 0.0
+    Ui2 = abs(I2) * np.cos(np.deg2rad(-120.0)) / i_norm
+    Vi2 = abs(I2) * np.sin(np.deg2rad(-120.0)) / i_norm
+    Ui3 = abs(I3) * np.cos(np.deg2rad(120.0)) / i_norm
+    Vi3 = abs(I3) * np.sin(np.deg2rad(120.0)) / i_norm
+
+    # Normalize voltages
+    u_norm = max(abs(U1), abs(U2), abs(U3))
+    if u_norm == 0:
+        u_norm = 1  # Avoid division by zero
+
+    # Calculate voltage vectors
+    Uu1 = 0.0
+    Vu1 = abs(U1) / u_norm
+    Uu2 = abs(U2) * np.cos(np.deg2rad(-30.0)) / u_norm
+    Vu2 = abs(U2) * np.sin(np.deg2rad(-30.0)) / u_norm
+    Uu3 = abs(U3) * np.cos(np.deg2rad(210.0)) / u_norm
+    Vu3 = abs(U3) * np.sin(np.deg2rad(210.0)) / u_norm
+
+    # Plot vectors
+    plt.figure()
+    plt.quiver([0, 0, 0], [0, 0, 0], [Ui1, Ui2, Ui3], [Vi1, Vi2, Vi3], color='r', angles='xy', scale_units='xy', scale=1, label='Currents')
+    plt.quiver([0, 0, 0], [0, 0, 0], [Uu1, Uu2, Uu3], [Vu1, Vu2, Vu3], color='b', angles='xy', scale_units='xy', scale=1, label='Voltages')
+    plt.xlim(-1.5, 1.5)
+    plt.ylim(-1.5, 1.5)
+    plt.legend()
+    plt.grid()
+    plt.title('Vector Plot')
+
+def hodograph(i1, i2, i3, u1, u2, u3):
+    # Calculate hodograph coordinates for voltages
+    Xu = (2 / 3) * (u1 - 0.5 * u2 - 0.5 * u3)
+    Yu = (2 / np.sqrt(3)) * (0.5 * u2 - 0.5 * u3)
+
+    # Calculate hodograph coordinates for currents
+    Xi = (2 / 3) * (i1 - 0.5 * i2 - 0.5 * i3)
+    Yi = (2 / np.sqrt(3)) * (0.5 * i2 - 0.5 * i3)
+
+    # Plot hodograph
+    plt.figure()
+    plt.scatter(Xi, Yi, color='r', label='Currents')
+    plt.scatter(Xu, Yu, color='b', label='Voltages')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.legend()
+    plt.grid()
+    plt.title('Hodograph')
+
+def plot_to_base64():
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    plt.clf()  # Clear the current figure
+    plt.close()  # Close the figure to free memory
+    return base64.b64encode(buf.getvalue()).decode('utf-8')
+
+@app.route('/vector_plot', methods=['POST'])
+def vector_plot_endpoint():
+    try:
+        data = request.get_json()
+        I1, I2, I3 = data.get('I1', 0), data.get('I2', 0), data.get('I3', 0)
+        U1, U2, U3 = data.get('U1', 0), data.get('U2', 0), data.get('U3', 0)
+
+        # Call the vector_plot function
+        vector_plot(I1, I2, I3, U1, U2, U3)
+
+        # Convert plot to base64 for response
+        plot_base64 = plot_to_base64()
+
+        return jsonify({"plot": plot_base64})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/hodograph', methods=['POST'])
+def hodograph_endpoint():
+    try:
+        data = request.get_json()
+        i1, i2, i3 = data.get('i1', 0), data.get('i2', 0), data.get('i3', 0)
+        u1, u2, u3 = data.get('u1', 0), data.get('u2', 0), data.get('u3', 0)
+
+        # Call the hodograph function
+        hodograph(i1, i2, i3, u1, u2, u3)
+
+        # Convert plot to base64 for response
+        plot_base64 = plot_to_base64()
+
+        return jsonify({"plot": plot_base64})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+def rfft(x, y):
+    N = len(y)
+    dx = x[1] - x[0]
+    S = np.fft.rfft(y)
+    f = np.fft.rfftfreq(N, dx)
+    A = np.abs(S) / len(S)  
+    return A
+def analytic_signal(x, y):
+    x_ext, y_ext, Nl, Nr = burg(x, y, 0.3, 16)
+    N = len(y)
+    S = signal.hilbert(y_ext, N + Nl + Nr)
+    S = S[Nl : N + Nl]
+    A = np.abs(S)
+    return A
+@app.route('/analyze', methods=['POST'])
+def analyze_data():
+    try:
+        df, error_response = process_request_df()
+        if error_response:
+            return error_response
+        column_names = df.columns.tolist()
+        SW = 100
+        results = []
+        window_defects = []  # Массив булевых значений для каждого окна
+        if len(df) < SW:
+            return jsonify({
+                "status": "pending",
+                "message": f"Insufficient data. Need at least {SW} rows, got {len(df)}.",
+                "data_received": len(df)
+            }), 202
+        # Обрабатываем до 100 окон
+        for i in range(1, min(SW+1, len(df) - SW + 1)):  # Ограничиваем до 100 окон
+            window_results = []
+            for j in range(min(6, len(column_names) - 1)):
+                t1 = df[column_names[0]].values[i - 1: i - 1 + SW]
+                f1 = df[column_names[j + 1]].values[i - 1: i - 1 + SW]
+                t2 = df[column_names[0]].values[i: i + SW]
+                f2 = df[column_names[j + 1]].values[i: i + SW]
+
+                if not np.all(np.isfinite(f1)) or not np.all(np.isfinite(f2)):
+                    return jsonify({"error": f"Invalid data in column {column_names[j + 1]}: contains NaN or Inf"}), 400
+
+                f1 -= np.mean(f1)
+                f2 -= np.mean(f2)
+
+                amp_0 = rfft(t1, f1)
+                ans_0 = analytic_signal(t1, f1)
+                amp = rfft(t2, f2)
+                ans = analytic_signal(t2, f2)
+
+                err_amp = np.max((amp - amp_0) / amp) if np.all(amp != 0) else float('inf')
+                err_ans = np.max((ans[:-1] - ans_0[1:]) / ans_0[1:]) if np.all(ans_0[1:] != 0) else float('inf')
+                
+                err_amp = float(err_amp) if np.isfinite(err_amp) else None
+                err_ans = float(err_ans) if np.isfinite(err_ans) else None
+                defect = bool(err_amp > 0.99 or err_ans > 0.99) if (err_amp is not None and err_ans is not None) else False
+
+                result = {
+                    "window_end_time": float(t2[-1]),
+                    "column": column_names[j + 1],
+                    "err_amp": err_amp,
+                    "err_ans": err_ans,
+                    "defect": defect
+                }
+                window_results.append(result)
+                results.append(result)
+
+            # Выбираем максимальное значение defect для окна
+            window_defect = any(r["defect"] for r in window_results)
+            window_defects.append(window_defect)
+
+        # Подсчитываем количество True
+        true_count = sum(window_defects)
+        
+        # Определяем статус и сообщение
+        if true_count < 50:
+            status = "normal"
+            message = "В норме"
+        elif 50 <= true_count <= 70:
+            status = "warning"
+            message = "Наблюдение"
+        else:
+            status = "alert"
+            message = "Проверка"
+
+        response_data = {
+            "status": "completed",
+            "results": results,  # Полные данные для отладки
+            "window_defects": window_defects,  # Массив из 100 булевых значений
+            "true_count": true_count,
+            "diagnosis": {
+                "status": status,
+                "message": message
+            }
+        }
+
+        return jsonify(response_data), 200
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+    
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)

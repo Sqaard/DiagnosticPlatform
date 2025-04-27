@@ -1,6 +1,79 @@
-/* Tab Bar */
+.diagnostics-result {
+  margin-top: 20px;
+}
+.status-bar-container {
+  margin-top: 10px;
+}
 
+.status-bar {
+  width: 100%;
+  height: 20px;
+  border-radius: 10px;
+  position: relative;
+  background: linear-gradient(to right, #f8d7da 100%, #d4edda 100%); /* По умолчанию красный */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
+.status-percentage {
+  color: rgba(0, 0, 0, 0.5); /* Прозрачный черный текст */
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.defect-count {
+  text-align: center;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #333;
+}
+.diagnosis-message {
+  padding: 10px;
+  border-radius: 5px;
+  text-align: center;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.normal {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.warning {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.alert {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+.header {
+  padding: 10px;
+  text-align: center;
+}
+
+.diagnostics-button {
+  padding: 8px 16px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.diagnostics-button:hover {
+  background-color: #45a049;
+}
+
+.diagnostics-result {
+  margin-top: 20px;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
 .tab-bar {
   display: flex;
   gap: 10px;

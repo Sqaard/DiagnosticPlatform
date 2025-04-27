@@ -8,7 +8,6 @@ services:
       - ./flask:/app
     environment:
       - FLASK_PORT=${FLASK_PORT}
-
   modbus:
     build: ./modbus
     container_name: electric-diagnostic-stand-frontend
@@ -25,7 +24,6 @@ services:
     depends_on:
       - flask
       - socket-server
-
   socket-server:
     build: ./server
     container_name: electric-diagnostic-stand-client

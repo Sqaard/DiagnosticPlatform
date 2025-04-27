@@ -6,3 +6,4 @@ PyWavelets
 scaleogram
 matplotlib
 python-dotenv
+pandas
