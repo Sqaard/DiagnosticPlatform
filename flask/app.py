@@ -1,18 +1,17 @@
 from flask import Flask, request, jsonify
-import pywt
 import numpy as np
 import pandas as pd
 from scipy import signal
-import scaleogram as scg 
 from flask_cors import CORS
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
-import os
+import tensorflow as tf
+import os     
 import io
 import base64
 import cmath
 import math
-import json
+import joblib
 # Load environment variables from .env file
 load_dotenv()
 
@@ -96,6 +95,8 @@ def process_request_df():
         return None, jsonify({"error": "Empty data provided."}), 400
     
     column_names = df.columns.tolist()
+    df = df.rename(columns={'time': 'Time'})
+    print(f"First few rows: {df.head().to_dict()}")
     if len(column_names) < 2:
         return None, jsonify({"error": "Data must contain at least two columns."}), 400
     return df, None
@@ -471,71 +472,72 @@ def analytic_signal(x, y):
     S = S[Nl : N + Nl]
     A = np.abs(S)
     return A
+
 @app.route('/analyze', methods=['POST'])
 def analyze_data():
     try:
         df, error_response = process_request_df()
         if error_response:
             return error_response
+
         column_names = df.columns.tolist()
         SW = 100
         results = []
-        window_defects = []  # Массив булевых значений для каждого окна
+        window_anomalies = []
+
         if len(df) < SW:
             return jsonify({
                 "status": "pending",
-                "message": f"Insufficient data. Need at least {SW} rows, got {len(df)}.",
+                "message": f"Недостаточно данных. Требуется минимум {SW} строк, получено {len(df)}.",
                 "data_received": len(df)
             }), 202
-        # Обрабатываем до 100 окон
-        for i in range(1, min(SW+1, len(df) - SW + 1)):  # Ограничиваем до 100 окон
+
+        # Load model, scaler, and thresholds
+        # Verify model files exist
+        model_path = "models/model.keras"
+        scaler_path = "models/scaler.pkl"
+        thresholds_path = "models/thresholds.npy"
+
+        for path in [model_path, scaler_path, thresholds_path]:
+            if not os.path.exists(path):
+                print(f"File not found: {path}")
+                return jsonify({"error": f"File not found: {path}"}), 500
+
+        # Load model, scaler, and thresholds
+        print(f"Loading model from {model_path}")
+        model = tf.keras.models.load_model(model_path)
+        print(f"Loading scaler from {scaler_path}")
+        scaler = joblib.load(scaler_path)
+        print(f"Loading thresholds from {thresholds_path}")
+        thresholds = np.load(thresholds_path)
+        num_sensors = len(column_names) - 1  # Exclude Time column
+
+        for i in range(min(100, len(df) - SW + 1)):
+            window = df.iloc[i:i+SW, 1:].values  # Shape: (SW, num_sensors)
+            window_scaled = scaler.transform(window).reshape(1, SW, num_sensors)
+            reconstructed = model.predict(window_scaled, verbose=0).reshape(SW, num_sensors)
             window_results = []
-            for j in range(min(6, len(column_names) - 1)):
-                t1 = df[column_names[0]].values[i - 1: i - 1 + SW]
-                f1 = df[column_names[j + 1]].values[i - 1: i - 1 + SW]
-                t2 = df[column_names[0]].values[i: i + SW]
-                f2 = df[column_names[j + 1]].values[i: i + SW]
-
-                if not np.all(np.isfinite(f1)) or not np.all(np.isfinite(f2)):
-                    return jsonify({"error": f"Invalid data in column {column_names[j + 1]}: contains NaN or Inf"}), 400
-
-                f1 -= np.mean(f1)
-                f2 -= np.mean(f2)
-
-                amp_0 = rfft(t1, f1)
-                ans_0 = analytic_signal(t1, f1)
-                amp = rfft(t2, f2)
-                ans = analytic_signal(t2, f2)
-
-                err_amp = np.max((amp - amp_0) / amp) if np.all(amp != 0) else float('inf')
-                err_ans = np.max((ans[:-1] - ans_0[1:]) / ans_0[1:]) if np.all(ans_0[1:] != 0) else float('inf')
-                
-                err_amp = float(err_amp) if np.isfinite(err_amp) else None
-                err_ans = float(err_ans) if np.isfinite(err_ans) else None
-                defect = bool(err_amp > 0.99 or err_ans > 0.99) if (err_amp is not None and err_ans is not None) else False
-
+            defects = []
+            for j in range(num_sensors):
+                error = np.mean((window_scaled[0, :, j] - reconstructed[:, j])**2)
+                defect = error > thresholds[j]
+                defects.append(bool(defect))  
                 result = {
-                    "window_end_time": float(t2[-1]),
+                    "window_end_time": float(df['Time'].values[i + SW - 1]),
                     "column": column_names[j + 1],
-                    "err_amp": err_amp,
-                    "err_ans": err_ans,
-                    "defect": defect
+                    "reconstruction_error": float(error),
+                    "defect": bool(defect)  
                 }
                 window_results.append(result)
-                results.append(result)
+            window_anomaly = any(defects)
+            window_anomalies.append(bool(window_anomaly)) 
+            results.extend(window_results)
 
-            # Выбираем максимальное значение defect для окна
-            window_defect = any(r["defect"] for r in window_results)
-            window_defects.append(window_defect)
-
-        # Подсчитываем количество True
-        true_count = sum(window_defects)
-        
-        # Определяем статус и сообщение
-        if true_count < 50:
+        anomaly_count = sum(window_anomalies)
+        if anomaly_count < 50:
             status = "normal"
             message = "В норме"
-        elif 50 <= true_count <= 70:
+        elif 50 <= anomaly_count <= 70:
             status = "warning"
             message = "Наблюдение"
         else:
@@ -544,19 +546,17 @@ def analyze_data():
 
         response_data = {
             "status": "completed",
-            "results": results,  # Полные данные для отладки
-            "window_defects": window_defects,  # Массив из 100 булевых значений
-            "true_count": true_count,
+            "results": results,
+            "window_anomalies": window_anomalies,
+            "anomaly_count": anomaly_count,
             "diagnosis": {
                 "status": status,
                 "message": message
             }
         }
-
         return jsonify(response_data), 200
     except Exception as e:
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
+        return jsonify({"error": f"Ошибка сервера: {str(e)}"}), 500
     
-
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)

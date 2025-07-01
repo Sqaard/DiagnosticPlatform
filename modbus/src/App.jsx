@@ -7,10 +7,10 @@ const App = () => {
   const [isAddGraphDisabled, setIsAddGraphDisabled] = useState(true);
   const [isDiagnosticsReady, setIsDiagnosticsReady] = useState(false);
   const [diagnosticsResult, setDiagnosticsResult] = useState(null);
-  const [isDiagnosticsRunning, setIsDiagnosticsRunning] = useState(false); // Флаг для автоповтора
-  const latestDataRef = useRef(latestData); // Для хранения актуального latestData
-  const WINDOW_SIZE = 210; // Размер окна для графиков
-  const DIAGNOSTICS_WINDOW_SIZE = 200; // Размер окна для диагностики
+  const [isDiagnosticsRunning, setIsDiagnosticsRunning] = useState(false); 
+  const latestDataRef = useRef(latestData); 
+  const WINDOW_SIZE = 210; 
+  const DIAGNOSTICS_WINDOW_SIZE = 200;
   const ws = useRef(null);
   const SOCKET_PORT = import.meta.env.VITE_SOCKET_PORT || 5001;
   const FLASK_PORT = import.meta.env.VITE_FLASK_PORT || 5000;
@@ -91,7 +91,6 @@ const App = () => {
         "Uc": data.map((row) => parseFloat(row.Uc)),
       };
     } else if (graphType === 'Analyze') {
-      //TO DO 
       requestBody = {
         "data": data.map((row) => ({
           "time": parseFloat(row.Time || row.t || 0),
@@ -126,7 +125,7 @@ const App = () => {
   
       const rawText = await response.text();
       const responseData = JSON.parse(rawText);
-      console.log('ResponseData:', responseData);
+      //console.log('ResponseData:', responseData);
   
       return responseData; 
     } catch (error) {
@@ -134,7 +133,7 @@ const App = () => {
       throw error;
     }
   };
-  // Диагностика
+
   const runDiagnostics = async () => {
     if (latestDataRef.current.length < DIAGNOSTICS_WINDOW_SIZE) {
       console.log(`Insufficient data: ${latestDataRef.current.length}/${DIAGNOSTICS_WINDOW_SIZE}`);
@@ -268,7 +267,7 @@ const App = () => {
       setLatestData((prevData) => {
         const updatedData = [...prevData, newData];
         if (updatedData.length > WINDOW_SIZE) {
-          return updatedData.slice(-WINDOW_SIZE); // Оставляем последние 150 значений
+          return updatedData.slice(-WINDOW_SIZE); 
         }
         return updatedData;
       });
@@ -405,14 +404,14 @@ const App = () => {
         <div
           className="status-bar"
           style={{
-            background: `linear-gradient(to right, #f8d7da ${diagnosticsResult.true_count}%, #d4edda ${diagnosticsResult.true_count}%)`,
+            background: `linear-gradient(to right, #f8d7da ${diagnosticsResult.anomaly_count}%, #d4edda ${diagnosticsResult.anomaly_count}%)`,
           }}
         >
           <span className="status-percentage">
-            {100 - diagnosticsResult.true_count}%
+            {100 - diagnosticsResult.anomaly_count}%
           </span>
         </div>
-        <p className="defect-count">Дефектов: {diagnosticsResult.true_count}</p>
+        <p className="defect-count">Дефектов: {diagnosticsResult.anomaly_count}</p>
       </div>
     </div>
     )}

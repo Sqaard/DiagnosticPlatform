@@ -3,7 +3,9 @@ flask-cors
 numpy
 scipy
 PyWavelets
-scaleogram
 matplotlib
 python-dotenv
 pandas
+tensorflow
+scikit-learn
+joblib>=1.1.0

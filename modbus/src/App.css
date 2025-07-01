@@ -129,7 +129,7 @@
   justify-content: center;
   align-items: center;
   border: none; /* Optional: A dashed border to indicate space */
-  background-color: transparent; /* Matches background */
+  background-color: white; /* Matches background */
   border-radius: 8px; /* Rounded corners */
 }
 
